@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+/* The booking page is re-coloured per host at render time by setting these
+   variables inline, so branding needs no rebuild and no per-tenant CSS file. */
+@theme {
+  --color-brand: #0f766e;
+  --color-ink: #10151a;
+  --color-muted: #667085;
+  --color-line: #e5e7eb;
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+:root {
+  --brand: #0f766e;
+  --brand-text: #ffffff;
+  --page-bg: #f6f7f9;
+  color-scheme: light;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  background: var(--page-bg);
+  color: #10151a;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.brand-bg { background: var(--brand); color: var(--brand-text); }
+.brand-text { color: var(--brand); }
+.brand-ring:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.brand-border { border-color: var(--brand); }
+
+.card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+}
+
+/* Slot buttons: outline by default, filled once selected. */
+.slot {
+  border: 1px solid var(--brand);
+  color: var(--brand);
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.7rem 0.5rem;
+  background: #fff;
+  transition: background 120ms ease, color 120ms ease;
+}
+.slot:hover { background: color-mix(in srgb, var(--brand) 8%, #fff); }
+.slot[data-selected="true"] { background: var(--brand); color: var(--brand-text); }
+
+.day {
+  border-radius: 999px;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.day[data-available="true"] { background: color-mix(in srgb, var(--brand) 12%, #fff); color: var(--brand); }
+.day[data-available="true"]:hover { background: color-mix(in srgb, var(--brand) 22%, #fff); }
+.day[data-selected="true"] { background: var(--brand); color: var(--brand-text); }
+.day[data-available="false"] { color: #b6bcc4; }

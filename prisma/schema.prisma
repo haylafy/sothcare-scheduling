@@ -1,0 +1,506 @@
+// Sothcare Scheduling — data model
+// Everything is scoped to an Organization (the Sothcare agency) so the module
+// is multi-tenant from day one. A Host is one person's scheduling identity and
+// maps 1:1 to a Sothcare user via `externalUserId`.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["queryCompiler", "driverAdapters"]
+  engineType      = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & hosts
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  hosts Host[]
+}
+
+/// One person who can be booked. `externalUserId` is the Sothcare user id.
+model Host {
+  id             String  @id @default(cuid())
+  organizationId String
+  externalUserId String? @unique
+  name           String
+  email          String
+  slug           String  @unique // sothcare.com/book/<slug>
+  timezone       String  @default("America/Chicago")
+
+  // ---- Booking page branding -------------------------------------------
+  headline      String?
+  welcomeText   String?
+  avatarUrl     String?
+  logoUrl       String?
+  brandColor    String  @default("#0F766E")
+  accentTextOn  String  @default("#FFFFFF") // text color used on brandColor
+  pageBackground String @default("#F6F7F9")
+  customCss     String?
+  showPoweredBy Boolean @default(true)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  eventTypes       EventType[]
+  schedules        Schedule[]
+  calendarAccounts CalendarAccount[]
+  bookings         Booking[]
+  workflows        Workflow[]
+  crmAccounts      CrmAccount[]
+  crmSyncRecords   CrmSyncRecord[]
+
+  @@index([organizationId])
+}
+
+// ---------------------------------------------------------------------------
+// Availability
+// ---------------------------------------------------------------------------
+
+/// A named set of weekly working hours, e.g. "Demo hours" or "Clinical hours".
+model Schedule {
+  id        String   @id @default(cuid())
+  hostId    String
+  name      String
+  timezone  String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  host       Host              @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  rules      AvailabilityRule[]
+  overrides  DateOverride[]
+  eventTypes EventType[]
+
+  @@index([hostId])
+}
+
+/// One recurring window. Minutes are from midnight in the schedule's timezone.
+model AvailabilityRule {
+  id          String @id @default(cuid())
+  scheduleId  String
+  dayOfWeek   Int // 0 = Sunday .. 6 = Saturday
+  startMinute Int
+  endMinute   Int
+
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId, dayOfWeek])
+}
+
+/// A specific calendar date that replaces the weekly rules (holiday, half day).
+model DateOverride {
+  id         String   @id @default(cuid())
+  scheduleId String
+  date       DateTime @db.Date
+  /// Empty array = unavailable all day. Otherwise [{startMinute,endMinute}].
+  windows    Json     @default("[]")
+  note       String?
+
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, date])
+}
+
+// ---------------------------------------------------------------------------
+// Event types (unlimited per host)
+// ---------------------------------------------------------------------------
+
+enum LocationType {
+  GOOGLE_MEET
+  PHONE_HOST_CALLS
+  PHONE_INVITEE_CALLS
+  IN_PERSON
+  CUSTOM
+}
+
+model EventType {
+  id          String  @id @default(cuid())
+  hostId      String
+  scheduleId  String?
+  slug        String
+  title       String
+  description String?
+  color       String  @default("#0F766E")
+
+  durationMinutes     Int          @default(30)
+  /// Slot grid. 15 => slots start at :00 :15 :30 :45.
+  slotIntervalMinutes Int          @default(15)
+  bufferBeforeMinutes Int          @default(0)
+  bufferAfterMinutes  Int          @default(0)
+  /// Invitees cannot book anything starting sooner than this.
+  minimumNoticeMinutes Int         @default(240)
+  /// Rolling window of bookable days from today.
+  rollingDays         Int          @default(60)
+  /// Hard cap of confirmed bookings per calendar day for this event type.
+  maxBookingsPerDay   Int?
+  /// >1 turns this into a group event (webinar / orientation class).
+  seatsPerSlot        Int          @default(1)
+
+  locationType  LocationType @default(GOOGLE_MEET)
+  locationValue String?
+
+  requiresConfirmation Boolean @default(false)
+  redirectUrl          String?
+  isActive             Boolean @default(true)
+  isHidden             Boolean @default(false) // reachable by link, not listed
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  host      Host                @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  schedule  Schedule?           @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  questions BookingQuestion[]
+  bookings  Booking[]
+  workflows WorkflowEventType[]
+
+  @@unique([hostId, slug])
+  @@index([hostId])
+}
+
+enum QuestionType {
+  TEXT
+  TEXTAREA
+  EMAIL
+  PHONE
+  SELECT
+  MULTISELECT
+  CHECKBOX
+}
+
+model BookingQuestion {
+  id          String       @id @default(cuid())
+  eventTypeId String
+  label       String
+  helpText    String?
+  type        QuestionType @default(TEXT)
+  required    Boolean      @default(false)
+  options     String[]     @default([])
+  position    Int          @default(0)
+
+  eventType EventType @relation(fields: [eventTypeId], references: [id], onDelete: Cascade)
+
+  @@index([eventTypeId])
+}
+
+// ---------------------------------------------------------------------------
+// Connected calendars (multiple accounts, multiple calendars each)
+// ---------------------------------------------------------------------------
+
+enum CalendarProvider {
+  GOOGLE
+  MICROSOFT
+  CALDAV
+}
+
+model CalendarAccount {
+  id       String           @id @default(cuid())
+  hostId   String
+  provider CalendarProvider @default(GOOGLE)
+  /// The account's own address, e.g. salmaan@sothcare.com
+  email    String
+  /// Encrypted at rest with TOKEN_ENCRYPTION_KEY.
+  refreshToken String
+  accessToken  String?
+  expiresAt    DateTime?
+  scope        String?
+  isActive     Boolean  @default(true)
+  lastSyncedAt DateTime?
+  lastError    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  host      Host       @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  calendars Calendar[]
+
+  @@unique([hostId, provider, email])
+  @@index([hostId])
+}
+
+model Calendar {
+  id         String  @id @default(cuid())
+  accountId  String
+  externalId String
+  name       String
+  timezone   String?
+  isPrimary  Boolean @default(false)
+  /// Busy times on this calendar block slots.
+  checkConflicts Boolean @default(true)
+  /// New bookings are written to exactly one calendar per host.
+  isWriteTarget  Boolean @default(false)
+
+  account CalendarAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, externalId])
+  @@index([accountId])
+}
+
+// ---------------------------------------------------------------------------
+// Bookings
+// ---------------------------------------------------------------------------
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  RESCHEDULED
+}
+
+/// Set by the host after the meeting time has passed. UNKNOWN until then --
+/// distinct from "attended", since most bookings are never explicitly marked
+/// either way. Drives AFTER_EVENT workflow conditions (Workflow.condition)
+/// so a "no-show follow-up" sequence only fires for bookings actually marked
+/// NO_SHOW, not every booking indiscriminately.
+enum AttendanceStatus {
+  UNKNOWN
+  ATTENDED
+  NO_SHOW
+}
+
+model Booking {
+  id          String        @id @default(cuid())
+  uid         String        @unique // public, unguessable id used in links
+  organizationId String
+  hostId      String
+  eventTypeId String
+
+  startsAt DateTime
+  endsAt   DateTime
+  /// Timezone the host's calendar event is written in.
+  timezone String
+
+  status BookingStatus @default(CONFIRMED)
+  attendanceStatus AttendanceStatus @default(UNKNOWN)
+
+  inviteeName     String
+  inviteeEmail    String
+  inviteePhone    String?
+  inviteeTimezone String
+  inviteeNotes    String?
+  guestEmails     String[] @default([])
+  /// { questionId: answer } captured from the booking form.
+  answers         Json     @default("{}")
+
+  locationType   LocationType
+  locationDetail String?
+  meetingUrl     String?
+
+  externalEventId    String?
+  externalCalendarId String?
+
+  cancelledAt      DateTime?
+  cancelReason     String?
+  cancelledBy      String? // "host" | "invitee"
+  rescheduledFromId String?  @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  host      Host      @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  eventType EventType @relation(fields: [eventTypeId], references: [id], onDelete: Cascade)
+
+  rescheduledFrom Booking?  @relation("Reschedule", fields: [rescheduledFromId], references: [id], onDelete: SetNull)
+  rescheduledTo   Booking?  @relation("Reschedule")
+
+  workflowRuns  WorkflowRun[]
+  notifications NotificationLog[]
+  crmSyncRecord CrmSyncRecord?
+
+  @@index([hostId, startsAt])
+  @@index([eventTypeId, startsAt])
+  @@index([status, startsAt])
+}
+
+// ---------------------------------------------------------------------------
+// Workflows (automated notifications)
+// ---------------------------------------------------------------------------
+
+enum WorkflowTrigger {
+  BOOKING_CREATED
+  BEFORE_EVENT
+  AFTER_EVENT
+  BOOKING_CANCELLED
+  BOOKING_RESCHEDULED
+}
+
+enum WorkflowAction {
+  EMAIL_INVITEE
+  EMAIL_HOST
+  EMAIL_CUSTOM
+  WEBHOOK
+  /// Logs a timestamped note on the invitee's HubSpot contact timeline.
+  /// Requires a connected CrmAccount; a step whose host has none logs an
+  /// error on the run instead of silently doing nothing (same "fail loud"
+  /// stance as the rest of this codebase's integration points).
+  CRM_LOG_NOTE
+}
+
+/// Gates AFTER_EVENT runs on what actually happened at the meeting, decided
+/// at the moment the run is due (not when it was scheduled) -- attendance is
+/// usually marked well after a booking's WorkflowRun rows already exist.
+/// Meaningless for other triggers (checked as ANY there regardless).
+enum WorkflowCondition {
+  ANY
+  NO_SHOW_ONLY
+  ATTENDED_ONLY
+}
+
+model Workflow {
+  id       String          @id @default(cuid())
+  hostId   String
+  name     String
+  trigger  WorkflowTrigger
+  /// Minutes relative to the event start for BEFORE_EVENT / AFTER_EVENT.
+  offsetMinutes Int        @default(0)
+  condition WorkflowCondition @default(ANY)
+  isActive Boolean         @default(true)
+  /// When true the workflow runs for every event type, current and future.
+  allEventTypes Boolean    @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  host       Host                @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  steps      WorkflowStep[]
+  eventTypes WorkflowEventType[]
+  runs       WorkflowRun[]
+
+  @@index([hostId])
+}
+
+model WorkflowEventType {
+  workflowId  String
+  eventTypeId String
+
+  workflow  Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  eventType EventType @relation(fields: [eventTypeId], references: [id], onDelete: Cascade)
+
+  @@id([workflowId, eventTypeId])
+}
+
+model WorkflowStep {
+  id         String         @id @default(cuid())
+  workflowId String
+  action     WorkflowAction @default(EMAIL_INVITEE)
+  position   Int            @default(0)
+
+  /// Handlebars-lite templates: {{invitee_name}}, {{event_start}}, ...
+  subject    String?
+  body       String?
+  toOverride String? // EMAIL_CUSTOM
+  webhookUrl String? // WEBHOOK
+  /// Attach an .ics calendar invite to the email.
+  includeIcs Boolean @default(false)
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
+}
+
+enum RunStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+model WorkflowRun {
+  id           String    @id @default(cuid())
+  workflowId   String
+  bookingId    String
+  scheduledFor DateTime
+  status       RunStatus @default(PENDING)
+  attempts     Int       @default(0)
+  lastError    String?
+  sentAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  booking  Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowId, bookingId])
+  @@index([status, scheduledFor])
+}
+
+// ---------------------------------------------------------------------------
+// CRM integration (HubSpot)
+// ---------------------------------------------------------------------------
+
+enum CrmProvider {
+  HUBSPOT
+}
+
+/// One connected CRM account per host per provider. Tokens are encrypted at
+/// rest the same way CalendarAccount's are (src/lib/crypto.ts).
+model CrmAccount {
+  id                String      @id @default(cuid())
+  hostId            String
+  provider          CrmProvider @default(HUBSPOT)
+  /// HubSpot's own Hub/portal id -- shown in the dashboard so a host can
+  /// confirm it's connected to the right HubSpot account.
+  externalAccountId String?
+  refreshToken      String
+  accessToken       String?
+  expiresAt         DateTime?
+  scope             String?
+  isActive          Boolean     @default(true)
+  lastSyncedAt      DateTime?
+  lastError         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  host Host @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@unique([hostId, provider])
+  @@index([hostId])
+}
+
+/// Which HubSpot objects a given booking's invitee is already synced to, so
+/// re-syncing (a later workflow step, a reschedule) updates the same
+/// contact/engagement instead of creating duplicates on every touch.
+model CrmSyncRecord {
+  id           String      @id @default(cuid())
+  hostId       String
+  bookingId    String?     @unique
+  provider     CrmProvider @default(HUBSPOT)
+  contactId    String
+  engagementId String?
+  lastSyncedAt DateTime    @default(now())
+  lastError    String?
+
+  host    Host     @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([hostId])
+}
+
+model NotificationLog {
+  id        String   @id @default(cuid())
+  bookingId String?
+  channel   String   @default("email")
+  kind      String // confirmation | reminder | cancellation | reschedule | workflow
+  to        String
+  subject   String?
+  success   Boolean  @default(true)
+  error     String?
+  createdAt DateTime @default(now())
+
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+  @@index([createdAt])
+}
