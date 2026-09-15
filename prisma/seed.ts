@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { DEFAULT_TEMPLATES } from "../src/lib/templates";
+import { dbSslConfig } from "../src/lib/db-ssl";
 
 try {
   process.loadEnvFile(".env");
@@ -8,15 +9,10 @@ try {
   /* .env is optional when the environment is already populated */
 }
 
-// RDS (and most managed Postgres) requires SSL; local dev Postgres usually
-// doesn't have it configured at all, so only turn it on for non-local hosts.
-// AWS RDS server certs chain to a root already in Node's trust store, so
-// this verifies normally -- no need to relax certificate checking.
-const isLocalDb = /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL ?? "");
 const prisma = new PrismaClient({
   adapter: new PrismaPg({
     connectionString: process.env.DATABASE_URL,
-    ssl: isLocalDb ? false : true,
+    ssl: dbSslConfig(process.env.DATABASE_URL),
   }),
 });
 
