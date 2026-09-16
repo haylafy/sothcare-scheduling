@@ -7,13 +7,17 @@ import { prisma } from "./prisma";
  * !!! READ BEFORE DEPLOYING !!!
  * `x-sothcare-user-id` is trusted, so it MUST be set by your own gateway and
  * stripped from inbound requests at the edge (ALB/CloudFront/nginx). If a
- * client can set that header, it can impersonate any host. The right fix when
- * you mount this in Sothcare is to delete `currentExternalUserId()` entirely
- * and call Sothcare's own session helper here; nothing else in the module
- * needs to change.
+ * client can set that header, it can impersonate any host.
  *
- * The cookie fallback and the "first host" fallback are development
- * conveniences and are hard-disabled in production.
+ * `sothcare_session_user_id` is the SSO cookie set by /api/auth/sso after it
+ * verifies a short-lived, single-purpose token minted by Sothcare's own
+ * POST /scheduling/sso-handoff (requires that app's normal login). It's
+ * httpOnly and only ever written server-side after that verification, so
+ * trusting it here in production is safe -- unlike the dev cookie below,
+ * a browser can't set it itself.
+ *
+ * The `sothcare_user_id` cookie and the "first host" fallback are
+ * development conveniences ONLY and are hard-disabled in production.
  */
 
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -23,9 +27,12 @@ async function currentExternalUserId(): Promise<string | null> {
   const fromGateway = h.get("x-sothcare-user-id");
   if (fromGateway) return fromGateway;
 
+  const c = await cookies();
+  const fromSso = c.get("sothcare_session_user_id")?.value;
+  if (fromSso) return fromSso;
+
   if (IS_PRODUCTION) return null;
 
-  const c = await cookies();
   return c.get("sothcare_user_id")?.value ?? null;
 }
 
