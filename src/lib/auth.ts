@@ -1,5 +1,6 @@
 import { cookies, headers } from "next/headers";
 import { prisma } from "./prisma";
+import { sessionHost } from "./session";
 
 /**
  * Session glue — the one file to change when mounting this inside Sothcare.
@@ -37,6 +38,11 @@ async function currentExternalUserId(): Promise<string | null> {
 }
 
 export async function getCurrentHost() {
+  // Standalone (password) accounts come first -- that's the primary way in
+  // now; the Sothcare SSO paths below stay for hosts linked that way.
+  const fromSession = await sessionHost();
+  if (fromSession) return fromSession;
+
   const externalUserId = await currentExternalUserId();
 
   if (externalUserId) {
@@ -44,7 +50,10 @@ export async function getCurrentHost() {
     if (host) return host;
   }
 
-  if (!IS_PRODUCTION) {
+  // Opt-in only. This used to fire for any non-production build, which meant
+  // a local dev server could never exercise the real sign-in flow -- it was
+  // always already "logged in" as whichever host happened to be created first.
+  if (!IS_PRODUCTION && process.env.SCHEDULING_DEV_AUTOLOGIN === "1") {
     return prisma.host.findFirst({ orderBy: { createdAt: "asc" } });
   }
 

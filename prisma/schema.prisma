@@ -28,13 +28,17 @@ model Organization {
   hosts Host[]
 }
 
-/// One person who can be booked. `externalUserId` is the Sothcare user id.
+/// One person who can be booked. `externalUserId` links a host to a Sothcare
+/// user (SSO handoff, src/app/api/auth/sso). `passwordHash` is set instead for
+/// a standalone account created directly at book.sothcare.com/signup -- the
+/// two are independent; a host can have either, both, or (never) neither.
 model Host {
   id             String  @id @default(cuid())
   organizationId String
   externalUserId String? @unique
+  passwordHash   String?
   name           String
-  email          String
+  email          String  @unique
   slug           String  @unique // sothcare.com/book/<slug>
   timezone       String  @default("America/Chicago")
 
@@ -61,8 +65,26 @@ model Host {
   workflows        Workflow[]
   crmAccounts      CrmAccount[]
   crmSyncRecords   CrmSyncRecord[]
+  sessions         Session[]
 
   @@index([organizationId])
+}
+
+/// A logged-in browser session for a standalone (password) account. Stored
+/// server-side rather than as a self-contained signed cookie so signing out
+/// -- or revoking every session after a password change -- takes effect
+/// immediately instead of waiting for a token to expire.
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  hostId    String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  host Host @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@index([hostId])
+  @@index([expiresAt])
 }
 
 // ---------------------------------------------------------------------------

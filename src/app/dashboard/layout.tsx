@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getCurrentHost } from "@/lib/auth";
 import { BASE_PATH } from "@/lib/env";
+import { logout } from "../(auth)/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +18,9 @@ const NAV = [
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const host = await getCurrentHost();
+  // Nothing under /dashboard makes sense without a host -- send people to sign
+  // in rather than rendering an empty shell that looks broken.
+  if (!host) redirect("/login");
   const base = BASE_PATH();
 
   return (
@@ -34,16 +39,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </Link>
             ))}
           </nav>
-          {host && (
+          <div className="ml-auto flex items-center gap-4">
             <a
               href={`${base}/book/${host.slug}`}
               target="_blank"
               rel="noreferrer"
-              className="ml-auto text-sm font-semibold text-teal-700 hover:underline"
+              className="text-sm font-semibold text-teal-700 hover:underline"
             >
               View booking page ↗
             </a>
-          )}
+            <form action={logout}>
+              <button className="text-sm text-slate-500 hover:text-slate-900">Sign out</button>
+            </form>
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
