@@ -10,6 +10,7 @@ import { sendMail } from "./mail";
 import { buildIcs } from "./ics";
 import { cancelRunsForBooking, scheduleWorkflowRuns, runWorkflowsNow } from "./workflows";
 import { publicUrl } from "./env";
+import { VIDEO_LINK_LOCATIONS } from "./locations";
 
 const ACTIVE: BookingStatus[] = ["CONFIRMED", "PENDING"];
 
@@ -268,6 +269,9 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
         answers: (input.answers ?? {}) as Prisma.InputJsonValue,
         locationType: eventType.locationType,
         locationDetail: eventType.locationValue,
+        // Zoom/Teams: the host's standing link is the meeting URL from the
+        // start. Google Meet's is filled in later by syncToCalendar.
+        meetingUrl: VIDEO_LINK_LOCATIONS.has(eventType.locationType) ? eventType.locationValue : null,
         rescheduledFromId: input.rescheduledFromId,
       },
     });

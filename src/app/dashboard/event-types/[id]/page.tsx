@@ -5,6 +5,7 @@ import { getCurrentHost } from "@/lib/auth";
 import { updateEventType, addQuestion, deleteQuestion } from "../../actions";
 import { Card, TextInput, TextArea, Select, Toggle, Button } from "@/components/form";
 import { BASE_PATH } from "@/lib/env";
+import { LOCATION_OPTIONS } from "@/lib/locations";
 
 export const dynamic = "force-dynamic";
 
@@ -77,19 +78,13 @@ export default async function EditEventType({ params }: { params: Promise<{ id: 
             name="locationType"
             label="Location"
             defaultValue={eventType.locationType}
-            options={[
-              { value: "GOOGLE_MEET", label: "Google Meet (link created automatically)" },
-              { value: "PHONE_HOST_CALLS", label: "Phone — we call the invitee" },
-              { value: "PHONE_INVITEE_CALLS", label: "Phone — invitee calls us" },
-              { value: "IN_PERSON", label: "In person" },
-              { value: "CUSTOM", label: "Custom" },
-            ]}
+            options={LOCATION_OPTIONS}
           />
           <TextInput
             name="locationValue"
             label="Location detail"
             defaultValue={eventType.locationValue}
-            hint="Address, phone number, or a link."
+            hint="Address, phone number, or a link. For Zoom/Teams paste your personal meeting link — it's only shared with people who book."
           />
 
           <Select

@@ -3,16 +3,9 @@ import { loadEventType } from "@/lib/bookings";
 import BrandShell from "@/components/BrandShell";
 import BookingFlow from "@/components/BookingFlow";
 import { BASE_PATH } from "@/lib/env";
+import { LOCATION_LABELS, VIDEO_LINK_LOCATIONS } from "@/lib/locations";
 
 export const dynamic = "force-dynamic";
-
-const LOCATION_LABELS: Record<string, string> = {
-  GOOGLE_MEET: "Google Meet",
-  PHONE_HOST_CALLS: "Phone call — we'll call you",
-  PHONE_INVITEE_CALLS: "Phone call — you'll call us",
-  IN_PERSON: "In person",
-  CUSTOM: "Details to follow",
-};
 
 export async function generateMetadata({
   params,
@@ -37,7 +30,10 @@ export default async function BookingPage({
   const eventType = await loadEventType(hostSlug, eventSlug);
   if (!eventType) notFound();
 
-  const location = eventType.locationValue ?? LOCATION_LABELS[eventType.locationType];
+  // A Zoom/Teams locationValue is the join link -- only people who book get it.
+  const location = VIDEO_LINK_LOCATIONS.has(eventType.locationType)
+    ? LOCATION_LABELS[eventType.locationType]
+    : (eventType.locationValue ?? LOCATION_LABELS[eventType.locationType]);
 
   return (
     <BrandShell host={eventType.host}>

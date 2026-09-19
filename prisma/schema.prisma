@@ -142,6 +142,11 @@ model DateOverride {
 
 enum LocationType {
   GOOGLE_MEET
+  /// Host's personal meeting link (Zoom PMI / Teams meeting URL) in
+  /// locationValue; copied onto Booking.meetingUrl at booking time. Unlike
+  /// GOOGLE_MEET nothing is generated per booking.
+  ZOOM
+  MICROSOFT_TEAMS
   PHONE_HOST_CALLS
   PHONE_INVITEE_CALLS
   IN_PERSON

@@ -71,6 +71,10 @@ export function describeLocation(booking: {
   switch (booking.locationType) {
     case "GOOGLE_MEET":
       return booking.meetingUrl ? `Google Meet — ${booking.meetingUrl}` : "Google Meet (link to follow)";
+    case "ZOOM":
+      return booking.meetingUrl ? `Zoom — ${booking.meetingUrl}` : "Zoom (link to follow)";
+    case "MICROSOFT_TEAMS":
+      return booking.meetingUrl ? `Microsoft Teams — ${booking.meetingUrl}` : "Microsoft Teams (link to follow)";
     case "PHONE_HOST_CALLS":
       return booking.inviteePhone ? `We will call you at ${booking.inviteePhone}` : "Phone call";
     case "PHONE_INVITEE_CALLS":

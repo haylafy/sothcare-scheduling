@@ -134,6 +134,19 @@ export async function deleteEventType(formData: FormData) {
   revalidatePath("/dashboard/event-types");
 }
 
+/** The card's Turn on / Turn off button. Off = link still resolves, no new bookings. */
+export async function toggleEventType(formData: FormData) {
+  const host = await requireHost();
+  const id = String(formData.get("id"));
+  const owned = await prisma.eventType.findFirst({
+    where: { id, hostId: host.id },
+    select: { isActive: true },
+  });
+  if (!owned) throw new Error("Not found");
+  await prisma.eventType.update({ where: { id }, data: { isActive: !owned.isActive } });
+  revalidatePath("/dashboard/event-types");
+}
+
 export async function addQuestion(formData: FormData) {
   const host = await requireHost();
   const eventTypeId = String(formData.get("eventTypeId"));
