@@ -277,6 +277,15 @@ async function hubspotFetch(
       .catch(() => undefined);
     throw new Error(message);
   }
+  if (account.lastError) {
+    // A private-app account has no token refresh to clear this on; do it on
+    // the first call that succeeds so the dashboard stops showing a stale
+    // "last sync failed" once the cause is fixed.
+    await prisma.crmAccount
+      .update({ where: { id: account.id }, data: { lastError: null, lastSyncedAt: new Date() } })
+      .catch(() => undefined);
+    account.lastError = null;
+  }
   return res.status === 204 ? null : res.json();
 }
 
@@ -342,6 +351,9 @@ export async function logMeetingEngagement(account: CrmAccount, input: MeetingEn
     method: "POST",
     body: JSON.stringify({
       properties: {
+        // Required by HubSpot ("Error creating MEETING_EVENT. Some required
+        // properties were not set." without it); must equal the start time.
+        hs_timestamp: input.start.toISOString(),
         hs_meeting_title: input.title,
         hs_meeting_body: input.body ?? "",
         hs_meeting_start_time: input.start.toISOString(),
