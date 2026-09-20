@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getCurrentHost } from "@/lib/auth";
-import { setCalendarFlags, disconnectCalendarAccount } from "../actions";
-import { Card, Button } from "@/components/form";
+import { setCalendarFlags, disconnectCalendarAccount, setInviteAttendees } from "../actions";
+import { Card, Button, Toggle } from "@/components/form";
 import { BASE_PATH } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +45,7 @@ export default async function CalendarsPage({
           <p className="text-sm text-slate-600">
             Set <code className="rounded bg-slate-100 px-1">GOOGLE_CLIENT_ID</code> and{" "}
             <code className="rounded bg-slate-100 px-1">GOOGLE_CLIENT_SECRET</code> to enable Google
-            Calendar. Any Google account works, including the sothcare.com Workspace accounts.
+            Calendar. Any Google account works.
           </p>
         ) : (
           <a
@@ -56,6 +56,25 @@ export default async function CalendarsPage({
           </a>
         )}
       </Card>
+
+      {accounts.length > 0 && (
+        <Card
+          title="What customers can see"
+          description="Your own confirmation email and calendar invite (.ics) always go out from Sothcare, with your Sothcare name and email as the organizer. This controls the Google side only."
+        >
+          <form action={setInviteAttendees} className="flex flex-wrap items-end gap-4">
+            <div className="min-w-[18rem] flex-1">
+              <Toggle
+                name="inviteAttendeesOnCalendar"
+                label="Also add the customer as an attendee on my Google Calendar event"
+                defaultChecked={host.inviteAttendeesOnCalendar}
+                hint="Off (recommended with a personal Gmail): the event stays private on your calendar and the customer never sees the connected Google address. On: Google may add the event to the customer's own calendar showing your connected account as the organizer."
+              />
+            </div>
+            <Button variant="ghost">Save</Button>
+          </form>
+        </Card>
+      )}
 
       {accounts.map((account) => (
         <Card key={account.id} title={account.email} description={`${account.provider} · ${account.calendars.length} calendars`}>

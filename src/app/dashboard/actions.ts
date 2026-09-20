@@ -281,6 +281,16 @@ export async function setCalendarFlags(formData: FormData) {
   revalidatePath("/dashboard/calendars");
 }
 
+/** Host-level privacy switch for the Google Calendar sync (see Host.inviteAttendeesOnCalendar). */
+export async function setInviteAttendees(formData: FormData) {
+  const host = await requireHost();
+  await prisma.host.update({
+    where: { id: host.id },
+    data: { inviteAttendeesOnCalendar: formData.get("inviteAttendeesOnCalendar") === "on" },
+  });
+  revalidatePath("/dashboard/calendars");
+}
+
 export async function disconnectCalendarAccount(formData: FormData) {
   const host = await requireHost();
   await prisma.calendarAccount.deleteMany({

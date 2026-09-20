@@ -52,6 +52,11 @@ model Host {
   pageBackground String @default("#F6F7F9")
   customCss     String?
   showPoweredBy Boolean @default(true)
+  /// Add the invitee (and guests) as attendees on the Google Calendar event.
+  /// Off by default: with a personal Gmail connected, an attendee sees that
+  /// address as the organizer when the event syncs to their own calendar.
+  /// Our own branded email + .ics (organizer = Host.email) always go out.
+  inviteAttendeesOnCalendar Boolean @default(false)
 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())

@@ -317,7 +317,10 @@ export async function syncToCalendar(bookingId: string) {
     start: booking.startsAt,
     end: booking.endsAt,
     timezone: booking.timezone,
-    attendees: [booking.inviteeEmail, ...booking.guestEmails],
+    // Off by default: a personal Gmail write-target would otherwise appear as
+    // organizer on the invitee's own calendar. Our branded email + .ics
+    // still reach them either way.
+    attendees: booking.host.inviteAttendeesOnCalendar ? [booking.inviteeEmail, ...booking.guestEmails] : [],
     location: booking.locationDetail ?? undefined,
     addMeet: booking.locationType === "GOOGLE_MEET",
   });
