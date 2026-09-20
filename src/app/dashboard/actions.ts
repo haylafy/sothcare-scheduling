@@ -193,12 +193,31 @@ export async function saveSchedule(formData: FormData) {
   const owned = await prisma.schedule.findFirst({ where: { id: scheduleId, hostId: host.id } });
   if (!owned) throw new Error("Not found");
 
+  // Rows are start_{day}_{i} / end_{day}_{i} for i = 0..n (the last one is the
+  // blank "add another window" row); remove_{day}_{i} drops a row. Overlapping
+  // or touching windows are merged so the stored rules stay tidy.
   const rules: Array<{ dayOfWeek: number; startMinute: number; endMinute: number }> = [];
   for (let day = 0; day < 7; day += 1) {
     if (formData.get(`enabled_${day}`) !== "on") continue;
-    const start = parseTime(String(formData.get(`start_${day}`) ?? "09:00"));
-    const end = parseTime(String(formData.get(`end_${day}`) ?? "17:00"));
-    if (end > start) rules.push({ dayOfWeek: day, startMinute: start, endMinute: end });
+    const windows: Array<{ startMinute: number; endMinute: number }> = [];
+    for (let i = 0; formData.has(`start_${day}_${i}`) || formData.has(`end_${day}_${i}`); i += 1) {
+      if (formData.get(`remove_${day}_${i}`) === "on") continue;
+      const startRaw = String(formData.get(`start_${day}_${i}`) ?? "").trim();
+      const endRaw = String(formData.get(`end_${day}_${i}`) ?? "").trim();
+      if (!startRaw || !endRaw) continue;
+      const start = parseTime(startRaw);
+      const end = parseTime(endRaw);
+      if (end > start) windows.push({ startMinute: start, endMinute: end });
+    }
+    windows.sort((a, b) => a.startMinute - b.startMinute);
+    for (const w of windows) {
+      const last = rules[rules.length - 1];
+      if (last && last.dayOfWeek === day && w.startMinute <= last.endMinute) {
+        last.endMinute = Math.max(last.endMinute, w.endMinute);
+      } else {
+        rules.push({ dayOfWeek: day, ...w });
+      }
+    }
   }
 
   await prisma.$transaction([

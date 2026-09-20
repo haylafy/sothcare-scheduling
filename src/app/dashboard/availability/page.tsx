@@ -22,7 +22,13 @@ export default async function AvailabilityPage() {
   });
   if (!schedule) return <p className="text-sm text-slate-500">No schedule found — run the seed.</p>;
 
-  const byDay = new Map(schedule.rules.map((r) => [r.dayOfWeek, r]));
+  // Several windows per day are allowed (e.g. 9:00–11:00 and 13:00–17:00);
+  // each is its own AvailabilityRule row. Sorted so the form is stable.
+  const byDay = new Map<number, typeof schedule.rules>();
+  for (const rule of [...schedule.rules].sort((a, b) => a.startMinute - b.startMinute)) {
+    byDay.set(rule.dayOfWeek, [...(byDay.get(rule.dayOfWeek) ?? []), rule]);
+  }
+  const timeInput = "rounded-lg border border-slate-200 px-2 py-1.5 text-sm";
 
   return (
     <div className="space-y-6">
@@ -41,28 +47,55 @@ export default async function AvailabilityPage() {
             <Select name="timezone" label="Timezone" defaultValue={schedule.timezone} options={TIMEZONES} />
           </div>
 
+          <p className="text-xs text-slate-500">
+            A day can have several windows, for example 9:00–11:00 and 13:00–17:00. Fill the blank row to add one,
+            tick <span className="font-medium">remove</span> to drop one, and untick a day to take it off entirely.
+            A window whose end is not after its start is ignored.
+          </p>
+
           <div className="divide-y divide-slate-100 border-t border-slate-100">
             {DAYS.map((day, index) => {
-              const rule = byDay.get(index);
+              const rules = byDay.get(index) ?? [];
+              // Existing windows, then one spare blank row. Its name index is
+              // rules.length so the action reads rows 0..n contiguously.
+              const rows = [...rules.map((r) => ({ start: toTime(r.startMinute), end: toTime(r.endMinute) })), { start: "", end: "" }];
               return (
-                <div key={day} className="flex flex-wrap items-center gap-3 py-3">
-                  <label className="flex w-40 items-center gap-2">
-                    <input type="checkbox" name={`enabled_${index}`} defaultChecked={!!rule} />
+                <div key={day} className="flex flex-wrap items-start gap-3 py-3">
+                  <label className="flex w-40 items-center gap-2 pt-1.5">
+                    <input type="checkbox" name={`enabled_${index}`} defaultChecked={rules.length > 0} />
                     <span className="text-sm font-medium text-slate-800">{day}</span>
                   </label>
-                  <input
-                    type="time"
-                    name={`start_${index}`}
-                    defaultValue={toTime(rule?.startMinute ?? 9 * 60)}
-                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                  />
-                  <span className="text-slate-400">to</span>
-                  <input
-                    type="time"
-                    name={`end_${index}`}
-                    defaultValue={toTime(rule?.endMinute ?? 17 * 60)}
-                    className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-                  />
+                  <div className="flex flex-col gap-2">
+                    {rows.map((row, i) => {
+                      const spare = i === rules.length;
+                      return (
+                        <div key={i} className="flex flex-wrap items-center gap-3">
+                          <input
+                            type="time"
+                            name={`start_${index}_${i}`}
+                            defaultValue={row.start}
+                            aria-label={`${day} window ${i + 1} start`}
+                            className={timeInput}
+                          />
+                          <span className="text-slate-400">to</span>
+                          <input
+                            type="time"
+                            name={`end_${index}_${i}`}
+                            defaultValue={row.end}
+                            aria-label={`${day} window ${i + 1} end`}
+                            className={timeInput}
+                          />
+                          {spare ? (
+                            <span className="text-xs text-slate-400">add another window</span>
+                          ) : (
+                            <label className="flex items-center gap-1 text-xs text-slate-500">
+                              <input type="checkbox" name={`remove_${index}_${i}`} /> remove
+                            </label>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
