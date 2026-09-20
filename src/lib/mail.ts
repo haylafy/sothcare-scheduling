@@ -36,6 +36,18 @@ export interface SendMailInput {
 
 let transporter: Transporter | null = null;
 
+const SEND_TIMEOUT_MS = Number(process.env.MAIL_SEND_TIMEOUT_MS || 15_000);
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${what} within ${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
 async function getTransport(): Promise<Transporter> {
   if (transporter) return transporter;
   const mode = (process.env.MAIL_TRANSPORT || "log").toLowerCase();
@@ -51,7 +63,11 @@ async function getTransport(): Promise<Transporter> {
     // sending identity lives in us-east-1 -- so the SES region must be pinned
     // separately or every send fails with "identity not verified".
     const ses = new SESv2Client({ region: process.env.SES_REGION || "us-east-1" });
-    transporter = nodemailer.createTransport({ SES: { sesClient: ses, SendEmailCommand } } as never);
+    // This { sesClient, SendEmailCommand } shape is the nodemailer >= 7 SES v2
+    // API. nodemailer 6 silently treats it as a legacy v2 SDK client and throws
+    // "sendRawEmail is not a function" from inside a stream callback -- which
+    // escapes every try/catch and crashes the whole server on the first send.
+    transporter = nodemailer.createTransport({ SES: { sesClient: ses, SendEmailCommand } });
   } else if (mode === "smtp") {
     transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
@@ -75,7 +91,9 @@ export async function sendMail(input: SendMailInput): Promise<{ ok: boolean; err
 
   try {
     const transport = await getTransport();
-    const info = await transport.sendMail({
+    // A hung provider must never hold a booking response open until the CDN
+    // gives up (CloudFront's origin timeout is 30s). Fail the email, keep the booking.
+    const info = await withTimeout(transport.sendMail({
       from,
       to: input.to,
       cc: input.cc?.length ? input.cc : undefined,
@@ -84,7 +102,7 @@ export async function sendMail(input: SendMailInput): Promise<{ ok: boolean; err
       text: input.text,
       html: input.html ?? textToHtml(input.text),
       attachments: input.attachments,
-    });
+    }), SEND_TIMEOUT_MS, "email provider did not respond");
     if ((process.env.MAIL_TRANSPORT || "log") === "log") {
       console.log(`[mail] -> ${input.to}: ${input.subject}`, (info as { messageId?: string }).messageId ?? "");
     }
