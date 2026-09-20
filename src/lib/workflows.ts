@@ -4,6 +4,7 @@ import { fetch as undiciFetch } from "undici";
 import { prisma } from "./prisma";
 import { bookingVars, describeLocation, renderTemplate } from "./templates";
 import { sendMail } from "./mail";
+import { workflowEmailHtml } from "./booking-emails";
 import { buildIcs } from "./ics";
 import { publicUrl } from "./env";
 import { assertSafeWebhookUrl } from "./url-safety";
@@ -86,7 +87,11 @@ export async function executeSteps(workflowId: string, bookingId: string) {
   });
   const booking = await prisma.booking.findUniqueOrThrow({
     where: { id: bookingId },
-    include: { eventType: true, host: true },
+    include: {
+      eventType: { include: { questions: true } },
+      host: { include: { organization: true } },
+      rescheduledFrom: true,
+    },
   });
 
   for (const step of workflow.steps) {
@@ -184,10 +189,13 @@ export async function executeSteps(workflowId: string, bookingId: string) {
         ]
       : undefined;
 
+    const subject = renderTemplate(step.subject ?? workflow.name, vars);
+    const body = renderTemplate(step.body ?? "", vars);
     await sendMail({
       to: recipient,
-      subject: renderTemplate(step.subject ?? workflow.name, vars),
-      text: renderTemplate(step.body ?? "", vars),
+      subject,
+      text: body,
+      html: workflowEmailHtml(booking, { trigger: workflow.trigger, toHost, subject, body }),
       replyTo: toHost ? booking.inviteeEmail : booking.host.email,
       bookingId: booking.id,
       kind: `workflow:${workflow.trigger.toLowerCase()}`,

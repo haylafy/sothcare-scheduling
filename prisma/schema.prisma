@@ -189,6 +189,13 @@ model EventType {
   isActive             Boolean @default(true)
   isHidden             Boolean @default(false) // reachable by link, not listed
 
+  /// "A note from <org>" shown in confirmation, reschedule and reminder
+  /// emails. Blank lines separate paragraphs.
+  emailNote      String?
+  /// One-line call-out rendered with an icon under the note
+  /// ("Please bring a laptop or iPad so you can follow along clearly.").
+  emailHighlight String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

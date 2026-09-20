@@ -104,6 +104,8 @@ export async function updateEventType(formData: FormData) {
       title: String(formData.get("title") ?? owned.title),
       slug: slugify(String(formData.get("slug") ?? owned.slug)) || owned.slug,
       description: String(formData.get("description") ?? "") || null,
+      emailNote: String(formData.get("emailNote") ?? "").trim().slice(0, 2000) || null,
+      emailHighlight: String(formData.get("emailHighlight") ?? "").trim().slice(0, 200) || null,
       color: String(formData.get("color") ?? owned.color),
       durationMinutes: num(formData, "durationMinutes", owned.durationMinutes, { min: 5, max: 1440 }),
       slotIntervalMinutes: num(formData, "slotIntervalMinutes", owned.slotIntervalMinutes, { min: 5, max: 1440 }),

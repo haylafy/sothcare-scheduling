@@ -7,6 +7,7 @@ import { getActiveHubSpotAccount, upsertContact, logMeetingEngagement, updateMee
 import { newBookingUid } from "./crypto";
 import { bookingVars, describeLocation, DEFAULT_TEMPLATES, renderTemplate } from "./templates";
 import { sendMail } from "./mail";
+import { hostCopyEmailHtml, inviteeEmailHtml } from "./booking-emails";
 import { buildIcs } from "./ics";
 import { cancelRunsForBooking, scheduleWorkflowRuns, runWorkflowsNow } from "./workflows";
 import { publicUrl } from "./env";
@@ -408,7 +409,11 @@ type EmailKind = "confirmation" | "cancellation" | "reschedule";
 export async function sendBookingEmail(bookingId: string, kind: EmailKind) {
   const booking = await prisma.booking.findUniqueOrThrow({
     where: { id: bookingId },
-    include: { eventType: true, host: true },
+    include: {
+      eventType: { include: { questions: true } },
+      host: { include: { organization: true } },
+      rescheduledFrom: true,
+    },
   });
   const vars = bookingVars(booking, booking.eventType, booking.host);
 
@@ -439,6 +444,7 @@ export async function sendBookingEmail(bookingId: string, kind: EmailKind) {
     cc: booking.guestEmails,
     subject: renderTemplate(template.subject, vars),
     text: renderTemplate(template.body, vars),
+    html: inviteeEmailHtml(booking, kind),
     replyTo: booking.host.email,
     bookingId: booking.id,
     kind,
@@ -457,6 +463,7 @@ export async function sendBookingEmail(bookingId: string, kind: EmailKind) {
       to: booking.host.email,
       subject: renderTemplate(DEFAULT_TEMPLATES.confirmationToHost.subject, hostVars),
       text: renderTemplate(DEFAULT_TEMPLATES.confirmationToHost.body, hostVars),
+      html: hostCopyEmailHtml(booking),
       replyTo: booking.inviteeEmail,
       bookingId: booking.id,
       kind: "confirmation-host",

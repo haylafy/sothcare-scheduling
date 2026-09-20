@@ -37,6 +37,23 @@ export default async function EditEventType({ params }: { params: Promise<{ id: 
           <div className="md:col-span-2">
             <TextArea name="description" label="Description" defaultValue={eventType.description} rows={3} />
           </div>
+          <div className="md:col-span-2">
+            <TextArea
+              name="emailNote"
+              label="Note in confirmation emails"
+              defaultValue={eventType.emailNote}
+              rows={4}
+              hint="Shown as “A note from your organization” in confirmation, reschedule and reminder emails. Leave a blank line to start a new paragraph."
+            />
+          </div>
+          <div className="md:col-span-2">
+            <TextInput
+              name="emailHighlight"
+              label="One-line call-out under the note"
+              defaultValue={eventType.emailHighlight ?? ""}
+              hint="Rendered with an icon so it stands out, e.g. “Please bring a laptop or iPad so you can follow along clearly.”"
+            />
+          </div>
 
           <TextInput name="durationMinutes" label="Duration (min)" type="number" defaultValue={eventType.durationMinutes} min={5} />
           <TextInput
