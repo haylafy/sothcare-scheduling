@@ -27,8 +27,13 @@ async function main() {
     create: { name: "Sothcare LLC", slug: "sothcare" },
   });
 
+  // Keyed on the email, not the slug: the owner renamed the booking-page slug
+  // in the dashboard (salmaan -> sothcare) and a slug lookup then tried to
+  // create a second host with the same email, which took every boot down
+  // with a unique-constraint error. The email is the stable identity here;
+  // `update: {}` means an existing host is never touched by the seed.
   const host = await prisma.host.upsert({
-    where: { slug: "salmaan" },
+    where: { email: "admin@sothcare.com" },
     update: {},
     create: {
       organizationId: organization.id,
