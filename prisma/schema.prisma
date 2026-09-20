@@ -491,6 +491,10 @@ model CrmAccount {
   /// HubSpot's own Hub/portal id -- shown in the dashboard so a host can
   /// confirm it's connected to the right HubSpot account.
   externalAccountId String?
+  /// "oauth": refreshToken/accessToken from the public-app OAuth flow.
+  /// "private_app": refreshToken holds the (encrypted) long-lived Private App
+  /// access token; there is nothing to refresh.
+  authMode          String      @default("oauth")
   refreshToken      String
   accessToken       String?
   expiresAt         DateTime?

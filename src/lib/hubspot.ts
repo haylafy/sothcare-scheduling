@@ -2,6 +2,7 @@ import type { CrmAccount } from "@prisma/client";
 import { prisma } from "./prisma";
 import { decryptSecret, encryptSecret } from "./crypto";
 import { publicUrl } from "./env";
+import { missingHubSpotScopes, normalizePrivateAppToken } from "./hubspot-token";
 
 /**
  * HubSpot CRM integration.
@@ -123,12 +124,87 @@ export async function completeHubSpotConnection(code: string, hostId: string) {
   });
 }
 
+/**
+ * Connect with a HubSpot *Private App* access token instead of OAuth. No
+ * developer account or public app is needed: the host creates a private app
+ * in their own portal (Settings -> Integrations -> Private Apps), grants the
+ * two contacts scopes, and pastes the token here. HubSpot documents these
+ * tokens as long-lived (rotated manually), so nothing is refreshed.
+ *
+ * The token is validated against HubSpot before anything is stored: the
+ * token-info endpoint tells us the portal (hub) id and granted scopes, and a
+ * missing scope is reported by name so it can be fixed in HubSpot rather than
+ * surfacing later as a failed sync.
+ */
+export async function connectWithPrivateAppToken(hostId: string, rawToken: string): Promise<CrmAccount> {
+  const token = normalizePrivateAppToken(rawToken);
+
+  let hubId: string | null = null;
+  let scopes: string[] | null = null;
+  const infoRes = await fetch(`${HUBSPOT_API_BASE}/oauth/v2/private-apps/get/access-token-info`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ tokenKey: token }),
+  });
+  if (infoRes.ok) {
+    const info = (await infoRes.json()) as { hubId?: number; scopes?: string[] };
+    hubId = info.hubId ? String(info.hubId) : null;
+    scopes = info.scopes ?? null;
+    const missing = missingHubSpotScopes(scopes);
+    if (missing.length) {
+      throw new Error(
+        `The token works, but the private app is missing the scope${missing.length > 1 ? "s" : ""} ${missing.join(", ")}. Add ${missing.length > 1 ? "them" : "it"} under the app's Scopes tab in HubSpot, then paste the token again.`,
+      );
+    }
+  } else if (infoRes.status === 400 || infoRes.status === 401 || infoRes.status === 404) {
+    throw new Error("HubSpot did not recognise that token. Copy it again from the private app's Auth tab (Show token -> Copy).");
+  } else {
+    // Token-info unavailable (rate limit, outage): prove the token works with
+    // the lightest call the integration itself makes.
+    const probe = await fetch(`${HUBSPOT_API_BASE}/crm/v3/objects/contacts?limit=1`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!probe.ok) {
+      throw new Error(`HubSpot rejected the token (${probe.status}). Check that the private app has the crm.objects.contacts scopes.`);
+    }
+  }
+
+  const encrypted = encryptSecret(token);
+  return prisma.crmAccount.upsert({
+    where: { hostId_provider: { hostId, provider: "HUBSPOT" } },
+    update: {
+      authMode: "private_app",
+      refreshToken: encrypted,
+      accessToken: encrypted,
+      expiresAt: null,
+      scope: scopes?.join(" ") ?? null,
+      externalAccountId: hubId,
+      isActive: true,
+      lastError: null,
+    },
+    create: {
+      hostId,
+      provider: "HUBSPOT",
+      authMode: "private_app",
+      refreshToken: encrypted,
+      accessToken: encrypted,
+      expiresAt: null,
+      scope: scopes?.join(" ") ?? null,
+      externalAccountId: hubId,
+    },
+  });
+}
+
 export async function getActiveHubSpotAccount(hostId: string): Promise<CrmAccount | null> {
   return prisma.crmAccount.findFirst({ where: { hostId, provider: "HUBSPOT", isActive: true } });
 }
 
 /** A live access token for this account, refreshing (and persisting) if expired. */
 async function liveAccessToken(account: CrmAccount): Promise<string> {
+  // Private App tokens are long-lived and cannot be refreshed; a 401 later
+  // means the token was rotated or the app deleted (see hubspotFetch).
+  if (account.authMode === "private_app") return decryptSecret(account.refreshToken);
+
   const stillValid = account.accessToken && account.expiresAt && account.expiresAt.getTime() - Date.now() > 60_000;
   if (stillValid) {
     try {
@@ -171,7 +247,10 @@ async function hubspotFetch(
   });
   if (!res.ok) {
     const body = await res.text();
-    const message = `HubSpot ${path} failed: ${res.status} ${body}`;
+    const message =
+      res.status === 401 && account.authMode === "private_app"
+        ? `HubSpot rejected the private app token (401). It was probably rotated or the app was deleted -- paste a new token on the Integrations page. ${body}`
+        : `HubSpot ${path} failed: ${res.status} ${body}`;
     await prisma.crmAccount
       .update({ where: { id: account.id }, data: { lastError: message } })
       .catch(() => undefined);

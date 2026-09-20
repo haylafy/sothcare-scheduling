@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { BASE_PATH } from "@/lib/env";
 import { requireHost } from "@/lib/auth";
 import { cancelBooking, markAttendance } from "@/lib/bookings";
 import { DEFAULT_TEMPLATES } from "@/lib/templates";
@@ -562,4 +564,23 @@ export async function disconnectCrmAccount(formData: FormData) {
     where: { id: String(formData.get("id")), hostId: host.id, provider: "HUBSPOT" },
   });
   revalidatePath("/dashboard/integrations");
+}
+
+/**
+ * Connect HubSpot with a Private App access token (no developer account or
+ * OAuth app required). The token is verified against HubSpot before it is
+ * stored; problems come back as a readable message on the Integrations page.
+ */
+export async function connectHubSpotToken(formData: FormData) {
+  const host = await requireHost();
+  const { connectWithPrivateAppToken } = await import("@/lib/hubspot");
+  let error: string | null = null;
+  try {
+    await connectWithPrivateAppToken(host.id, String(formData.get("token") ?? ""));
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+  }
+  revalidatePath("/dashboard/integrations");
+  // redirect() throws to unwind the action, so it stays outside the try/catch.
+  redirect(`${BASE_PATH()}/dashboard/integrations?${error ? `error=${encodeURIComponent(error)}` : "connected=1"}`);
 }
