@@ -139,34 +139,55 @@ export async function completeHubSpotConnection(code: string, hostId: string) {
 export async function connectWithPrivateAppToken(hostId: string, rawToken: string): Promise<CrmAccount> {
   const token = normalizePrivateAppToken(rawToken);
 
+  // Portal id + granted scopes are nice-to-have metadata; HubSpot has moved
+  // the token-info routes around (the documented v2 private-apps route
+  // returns a bare HTML 404 today), so try the known routes but never let a
+  // missing metadata endpoint reject a working token. The decisive check is
+  // the contacts probe: the lightest call the integration itself makes.
   let hubId: string | null = null;
   let scopes: string[] | null = null;
-  const infoRes = await fetch(`${HUBSPOT_API_BASE}/oauth/v2/private-apps/get/access-token-info`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tokenKey: token }),
-  });
-  if (infoRes.ok) {
-    const info = (await infoRes.json()) as { hubId?: number; scopes?: string[] };
-    hubId = info.hubId ? String(info.hubId) : null;
-    scopes = info.scopes ?? null;
+  try {
+    const v1 = await fetch(`${HUBSPOT_API_BASE}/oauth/v1/access-tokens/${encodeURIComponent(token)}`);
+    if (v1.ok) {
+      const info = (await v1.json()) as { hub_id?: number; scopes?: string[] };
+      hubId = info.hub_id ? String(info.hub_id) : null;
+      scopes = info.scopes ?? null;
+    } else {
+      const v2 = await fetch(`${HUBSPOT_API_BASE}/oauth/v2/private-apps/get/access-token-info`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tokenKey: token }),
+      });
+      if (v2.ok) {
+        const info = (await v2.json()) as { hubId?: number; scopes?: string[] };
+        hubId = info.hubId ? String(info.hubId) : null;
+        scopes = info.scopes ?? null;
+      }
+    }
+  } catch {
+    /* metadata only */
+  }
+
+  if (scopes) {
     const missing = missingHubSpotScopes(scopes);
     if (missing.length) {
       throw new Error(
         `The token works, but the private app is missing the scope${missing.length > 1 ? "s" : ""} ${missing.join(", ")}. Add ${missing.length > 1 ? "them" : "it"} under the app's Scopes tab in HubSpot, then paste the token again.`,
       );
     }
-  } else if (infoRes.status === 400 || infoRes.status === 401 || infoRes.status === 404) {
-    throw new Error("HubSpot did not recognise that token. Copy it again from the private app's Auth tab (Show token -> Copy).");
-  } else {
-    // Token-info unavailable (rate limit, outage): prove the token works with
-    // the lightest call the integration itself makes.
-    const probe = await fetch(`${HUBSPOT_API_BASE}/crm/v3/objects/contacts?limit=1`, {
-      headers: { authorization: `Bearer ${token}` },
-    });
-    if (!probe.ok) {
-      throw new Error(`HubSpot rejected the token (${probe.status}). Check that the private app has the crm.objects.contacts scopes.`);
-    }
+  }
+
+  const probe = await fetch(`${HUBSPOT_API_BASE}/crm/v3/objects/contacts?limit=1`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (probe.status === 401) {
+    throw new Error("HubSpot did not recognise that token. Use the Copy button on the private app's Auth tab (the masked pat-na… text on screen is not the token).");
+  }
+  if (probe.status === 403) {
+    throw new Error("HubSpot accepted the token but refused to read contacts. Add crm.objects.contacts.read and crm.objects.contacts.write under the app's Scopes tab, then paste the token again.");
+  }
+  if (!probe.ok) {
+    throw new Error(`HubSpot rejected the token (${probe.status}). Try again in a minute; if it persists, rotate the token in HubSpot and paste the new one.`);
   }
 
   const encrypted = encryptSecret(token);
