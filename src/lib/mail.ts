@@ -47,7 +47,10 @@ async function getTransport(): Promise<Transporter> {
     const { SESv2Client, SendEmailCommand } = await import(/* webpackIgnore: true */ sdk).catch(() => {
       throw new Error("MAIL_TRANSPORT=ses requires: npm i @aws-sdk/client-sesv2");
     });
-    const ses = new SESv2Client({ region: process.env.AWS_REGION || "us-east-1" });
+    // Fargate injects AWS_REGION=us-west-2 into every task, but the sothcare.com
+    // sending identity lives in us-east-1 -- so the SES region must be pinned
+    // separately or every send fails with "identity not verified".
+    const ses = new SESv2Client({ region: process.env.SES_REGION || "us-east-1" });
     transporter = nodemailer.createTransport({ SES: { sesClient: ses, SendEmailCommand } } as never);
   } else if (mode === "smtp") {
     transporter = nodemailer.createTransport({
