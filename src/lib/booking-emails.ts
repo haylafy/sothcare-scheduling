@@ -1,7 +1,7 @@
 import type { Booking, BookingQuestion, EventType, Host, Organization, WorkflowTrigger } from "@prisma/client";
 import { DateTime } from "luxon";
 import { APP_URL, publicUrl } from "./env";
-import { describeLocation } from "./templates";
+import { describeLocation, firstName } from "./templates";
 import {
   renderEmailLayout,
   type EmailBrand,
@@ -39,12 +39,11 @@ const STATUS: Record<string, EmailStatus> = {
   update: { label: "Update", tone: "slate" },
 };
 
-/** "hayl" -> "Hayl"; "" -> "there". Invitees type their own names. */
-export function firstName(name: string): string {
-  const first = name.trim().split(/\s+/)[0] ?? "";
-  if (!first) return "there";
-  return first[0]!.toUpperCase() + first.slice(1);
-}
+// Single implementation lives in templates.ts (see the note there on why the
+// dependency runs that way -- booking-emails already imports templates, so
+// the reverse would be a cycle). Re-exported so existing callers and tests
+// keep importing it from here.
+export { firstName };
 
 function normalizeOrgish(value: string): string {
   return value

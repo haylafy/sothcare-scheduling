@@ -9,6 +9,7 @@ import { buildIcs } from "./ics";
 import { publicUrl } from "./env";
 import { assertSafeWebhookUrl } from "./url-safety";
 import { getActiveHubSpotAccount, logTimelineNote } from "./hubspot";
+import { isEligibleForDemoFollowUp } from "./demo-followups";
 
 /**
  * Workflow engine.
@@ -59,6 +60,75 @@ export async function scheduleWorkflowRuns(bookingId: string) {
       update: { scheduledFor, status: "PENDING", lastError: null },
       create: { workflowId: workflow.id, bookingId, scheduledFor },
     });
+  }
+}
+
+/**
+ * Materialise (or move) the follow-up run for a booking whose attendance was
+ * just marked.
+ *
+ * Unlike scheduleWorkflowRuns this runs at MARK time, not booking time, and it
+ * is called again every time the host changes their mind. Three rules:
+ *
+ *   - the anchor is attendanceSetAt, so the grace period restarts on each
+ *     re-mark rather than counting from a decision the host has replaced;
+ *   - a run whose condition no longer matches is CANCELLED, so flipping
+ *     Attended -> No-show does not leave both queued;
+ *   - a run that has already SENT is left alone. The upsert below only ever
+ *     revives a PENDING row, so re-marking after the email went out cannot
+ *     send a second one. That is the idempotency guarantee, and it is a
+ *     property of the WHERE clause, not of the caller being careful.
+ */
+export async function scheduleAttendanceRuns(bookingId: string) {
+  const booking = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
+  const workflows = await workflowsFor(booking.hostId, booking.eventTypeId, [
+    "AFTER_ATTENDANCE_MARKED",
+  ]);
+  if (workflows.length === 0) return;
+
+  for (const workflow of workflows) {
+    const matches =
+      workflow.condition === "ANY" ||
+      (workflow.condition === "NO_SHOW_ONLY" && booking.attendanceStatus === "NO_SHOW") ||
+      (workflow.condition === "ATTENDED_ONLY" && booking.attendanceStatus === "ATTENDED");
+
+    // Unmarked, or marked the other way: retire any run we queued earlier.
+    // A SENT row is untouched -- updateMany is scoped to PENDING.
+    //
+    // The date cutoff gates the whole AFTER_ATTENDANCE_MARKED trigger, not
+    // just the two seeded demo follow-ups. That is deliberate but worth
+    // knowing: a custom workflow someone adds on this trigger later will also
+    // skip bookings that start before it. Every such booking is in the past,
+    // and the rule exists so that marking up a backlog cannot mail all of
+    // those prospects at once -- which is a property you want for any
+    // workflow on this trigger, not only these two.
+    if (!matches || !booking.attendanceSetAt || !isEligibleForDemoFollowUp(booking.startsAt)) {
+      await prisma.workflowRun.updateMany({
+        where: { workflowId: workflow.id, bookingId, status: "PENDING" },
+        data: { status: "CANCELLED" },
+      });
+      continue;
+    }
+
+    const scheduledFor = new Date(
+      booking.attendanceSetAt.getTime() + workflow.offsetMinutes * 60000,
+    );
+
+    // Revive/move only a run that has not gone out. A SENT row stays SENT --
+    // the update branch is guarded, and the create branch cannot fire because
+    // (workflowId, bookingId) is unique.
+    const moved = await prisma.workflowRun.updateMany({
+      where: { workflowId: workflow.id, bookingId, status: { in: ["PENDING", "CANCELLED"] } },
+      data: { scheduledFor, status: "PENDING", lastError: null },
+    });
+    if (moved.count === 0) {
+      await prisma.workflowRun
+        .create({ data: { workflowId: workflow.id, bookingId, scheduledFor } })
+        .catch(() => {
+          // Lost a race, or the row is SENT. Either way there is exactly one
+          // run for this pair and we must not make a second.
+        });
+    }
   }
 }
 
@@ -221,8 +291,8 @@ export async function processDueWorkflowRuns(limit = 200): Promise<CronResult> {
     orderBy: { scheduledFor: "asc" },
     take: limit,
     include: {
-      booking: { select: { status: true, attendanceStatus: true } },
-      workflow: { select: { condition: true } },
+      booking: { select: { status: true, attendanceStatus: true, startsAt: true } },
+      workflow: { select: { condition: true, trigger: true } },
     },
   });
 
@@ -239,6 +309,27 @@ export async function processDueWorkflowRuns(limit = 200): Promise<CronResult> {
         data: { status: "CANCELLED" },
       });
       continue;
+    }
+
+    // A follow-up anchored to the mark, not the meeting. Two extra ways it
+    // can become void between being queued and coming due, both of which
+    // must CANCEL rather than leave the row to be polled forever:
+    //   - the host unmarked the booking, so the anchor no longer exists;
+    //   - the booking starts before the cutoff. Checked here as well as at
+    //     schedule time because the cutoff is the rule that stops a backlog
+    //     of old demos being blasted at once, and a rule worth having is
+    //     worth enforcing at the point of sending.
+    if (run.workflow.trigger === "AFTER_ATTENDANCE_MARKED") {
+      const void_ =
+        run.booking.attendanceStatus === "UNKNOWN" ||
+        !isEligibleForDemoFollowUp(run.booking.startsAt);
+      if (void_) {
+        await prisma.workflowRun.updateMany({
+          where: { id: run.id, status: "PENDING" },
+          data: { status: "CANCELLED" },
+        });
+        continue;
+      }
     }
 
     // Attendance-gated workflows (e.g. a no-show follow-up sequence): the
@@ -309,5 +400,6 @@ export function describeTiming(trigger: WorkflowTrigger, offsetMinutes: number):
     .diff(DateTime.fromMillis(0))
     .shiftTo(offsetMinutes >= 1440 ? "days" : offsetMinutes >= 60 ? "hours" : "minutes")
     .toHuman({ maximumFractionDigits: 0 });
+  if (trigger === "AFTER_ATTENDANCE_MARKED") return `${amount} after the outcome is marked`;
   return trigger === "BEFORE_EVENT" ? `${amount} before the meeting` : `${amount} after the meeting`;
 }

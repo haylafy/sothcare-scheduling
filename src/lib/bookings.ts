@@ -9,7 +9,12 @@ import { bookingVars, describeLocation, DEFAULT_TEMPLATES, renderTemplate } from
 import { sendMail } from "./mail";
 import { hostCopyEmailHtml, inviteeEmailHtml } from "./booking-emails";
 import { buildIcs } from "./ics";
-import { cancelRunsForBooking, scheduleWorkflowRuns, runWorkflowsNow } from "./workflows";
+import {
+  cancelRunsForBooking,
+  scheduleAttendanceRuns,
+  scheduleWorkflowRuns,
+  runWorkflowsNow,
+} from "./workflows";
 import { publicUrl } from "./env";
 import { VIDEO_LINK_LOCATIONS } from "./locations";
 
@@ -381,13 +386,29 @@ export async function syncToCrm(bookingId: string) {
  * Host marks whether the invitee actually showed up. Drives AFTER_EVENT
  * workflow conditions (NO_SHOW_ONLY / ATTENDED_ONLY) and, when connected,
  * updates the HubSpot meeting engagement's outcome to match.
+ *
+ * Also stamps attendanceSetAt and (re)schedules AFTER_ATTENDANCE_MARKED
+ * follow-ups. Re-marking restarts the grace period rather than queueing a
+ * second email; unmarking clears the stamp and retires the pending run. An
+ * email that has already gone out is never un-sent -- scheduleAttendanceRuns
+ * only ever touches rows that are still PENDING.
  */
 export async function markAttendance(uid: string, status: AttendanceStatus) {
   const booking = await prisma.booking.update({
     where: { uid },
-    data: { attendanceStatus: status },
+    data: {
+      attendanceStatus: status,
+      attendanceSetAt: status === "UNKNOWN" ? null : new Date(),
+    },
     include: { crmSyncRecord: true },
   });
+
+  // Never let a follow-up scheduling problem fail the click that marks
+  // attendance -- the mark is the host's record of what happened, and the
+  // email is a consequence of it.
+  await scheduleAttendanceRuns(booking.id).catch((e) =>
+    console.error("[workflows] attendance follow-up scheduling failed", e),
+  );
 
   if (booking.crmSyncRecord?.engagementId) {
     const account = await getActiveHubSpotAccount(booking.hostId);

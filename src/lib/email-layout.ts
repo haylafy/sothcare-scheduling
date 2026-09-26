@@ -91,6 +91,16 @@ export interface EmailLayout {
   };
 }
 
+/**
+ * Physical postal address, shown in the footer of every email.
+ *
+ * Not decoration: CAN-SPAM requires a valid physical address on commercial
+ * email, and mailbox providers weigh its absence when scoring a sender. It
+ * lives here rather than in a template so no individual email can ship
+ * without it.
+ */
+export const POSTAL_ADDRESS = "Sothcare LLC, 6 Roxbury St, Boston, MA 02119, United States";
+
 const TONES: Record<StatusTone, { bg: string; fg: string }> = {
   green: { bg: "#DCFCE7", fg: "#166534" },
   amber: { bg: "#FEF3C7", fg: "#92400E" },
@@ -341,7 +351,8 @@ export function renderEmailLayout(input: EmailLayout): string {
       `<p class="muted" style="margin:0;font-size:12.5px;line-height:1.6;color:${MUTED};font-family:${FONT}">${esc(input.footer.why)}${
         input.footer.timezone ? ` Times are shown in <strong>${esc(input.footer.timezone)}</strong>.` : ""
       }${input.footer.replyHint ? ` ${esc(input.footer.replyHint)}` : ""}</p>
-       <p class="muted" style="margin:14px 0 0 0;font-size:12px;color:${MUTED};font-family:${FONT}">${esc(brand.orgName)} · <a href="${safeHref(brand.siteUrl)}" style="color:${MUTED}">${esc(brand.siteLabel)}</a>${poweredBy}</p>`,
+       <p class="muted" style="margin:14px 0 0 0;font-size:12px;color:${MUTED};font-family:${FONT}">${esc(brand.orgName)} · <a href="${safeHref(brand.siteUrl)}" style="color:${MUTED}">${esc(brand.siteLabel)}</a>${poweredBy}</p>
+       <p class="muted" style="margin:6px 0 0 0;font-size:11.5px;color:${MUTED};font-family:${FONT}">${esc(POSTAL_ADDRESS)}</p>`,
       "26px 36px 30px 36px",
     ),
   );

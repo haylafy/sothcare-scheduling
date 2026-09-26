@@ -16,7 +16,8 @@
     "cron:run": "tsx scripts/run-workflows.mts",
     "test": "tsx --test tests/*.test.ts",
     "email:preview": "tsx scripts/preview-emails.ts",
-    "email:preview:serve": "node scripts/serve-previews.mjs"
+    "email:preview:serve": "node scripts/serve-previews.mjs",
+    "e2e:followups": "tsx scripts/e2e-demo-followups.mts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

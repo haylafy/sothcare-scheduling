@@ -323,6 +323,10 @@ model Booking {
 
   status BookingStatus @default(CONFIRMED)
   attendanceStatus AttendanceStatus @default(UNKNOWN)
+  /// When the host marked attendance. Null while attendanceStatus is UNKNOWN.
+  /// Demo follow-ups anchor to this rather than to endsAt, so the host gets a
+  /// grace period to change their mind and re-marking MOVES the send.
+  attendanceSetAt  DateTime?
 
   inviteeName     String
   inviteeEmail    String
@@ -373,6 +377,8 @@ enum WorkflowTrigger {
   AFTER_EVENT
   BOOKING_CANCELLED
   BOOKING_RESCHEDULED
+  /// Offsets from Booking.attendanceSetAt instead of the meeting time.
+  AFTER_ATTENDANCE_MARKED
 }
 
 enum WorkflowAction {

@@ -9,12 +9,27 @@ import { publicUrl } from "./env";
  */
 export type TemplateVars = Record<string, string>;
 
+/**
+ * "hayl" -> "Hayl"; "" -> "there". Invitees type their own names.
+ *
+ * Lives here rather than in booking-emails.ts so that templates.ts can use it
+ * for {{invitee_first_name}} without importing booking-emails, which already
+ * imports THIS module -- that pair would be an import cycle.
+ * booking-emails.ts re-exports it, so its own callers and tests are unchanged.
+ */
+export function firstName(name: string): string {
+  const first = name.trim().split(/\s+/)[0] ?? "";
+  if (!first) return "there";
+  return first[0]!.toUpperCase() + first.slice(1);
+}
+
 export function renderTemplate(template: string, vars: TemplateVars): string {
   return template.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_match, key: string) => vars[key] ?? "");
 }
 
 export const TEMPLATE_VARIABLES = [
   "invitee_name",
+  "invitee_first_name",
   "invitee_email",
   "invitee_phone",
   "host_name",
@@ -31,6 +46,7 @@ export const TEMPLATE_VARIABLES = [
   "reschedule_url",
   "cancel_url",
   "booking_url",
+  "book_new_url",
 ] as const;
 
 export function bookingVars(
@@ -43,6 +59,9 @@ export function bookingVars(
   const start = DateTime.fromJSDate(booking.startsAt).setZone(timezone);
   return {
     invitee_name: booking.inviteeName,
+    // Falls back to "there" rather than "", because renderTemplate resolves a
+    // missing variable to an empty string and "Hi ," would go out as written.
+    invitee_first_name: firstName(booking.inviteeName),
     invitee_email: booking.inviteeEmail,
     invitee_phone: booking.inviteePhone ?? "",
     host_name: host.name,
@@ -59,6 +78,8 @@ export function bookingVars(
     reschedule_url: publicUrl(`/booking/${booking.uid}/reschedule`),
     cancel_url: publicUrl(`/booking/${booking.uid}/cancel`),
     booking_url: publicUrl(`/booking/${booking.uid}`),
+    // The host public page, for "pick another time" in a no-show follow-up.
+    book_new_url: publicUrl(`/book/${host.slug}`),
   };
 }
 

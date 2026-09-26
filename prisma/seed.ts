@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { DEFAULT_TEMPLATES } from "../src/lib/templates";
+import { DEMO_FOLLOW_UPS, DEMO_FOLLOWUP_OFFSET_MINUTES } from "../src/lib/demo-followups";
 import { dbSslConfig } from "../src/lib/db-ssl";
 
 try {
@@ -170,6 +171,20 @@ async function main() {
       action: "EMAIL_INVITEE" as const,
       template: DEFAULT_TEMPLATES.followUp,
     },
+    // Outcome-specific demo follow-ups, one hour after the HOST marks the
+    // booking. NOTE these overlap with "Follow-up after the meeting" above,
+    // which is condition: ANY -- a host who wants only the outcome-specific
+    // copy should deactivate that one in /dashboard/workflows. The seed does
+    // not deactivate it automatically: it is an existing host-visible setting
+    // and turning it off is the host's call, not a migration's.
+    ...DEMO_FOLLOW_UPS.map((f) => ({
+      name: f.name,
+      trigger: "AFTER_ATTENDANCE_MARKED" as const,
+      offsetMinutes: DEMO_FOLLOWUP_OFFSET_MINUTES,
+      action: "EMAIL_INVITEE" as const,
+      condition: f.condition,
+      template: { subject: f.subject, body: f.body },
+    })),
   ];
 
   for (const config of workflows) {
@@ -181,6 +196,9 @@ async function main() {
         name: config.name,
         trigger: config.trigger,
         offsetMinutes: config.offsetMinutes,
+        // Defaults to ANY in the schema; only the outcome-specific follow-ups
+        // set it.
+        condition: "condition" in config ? config.condition : undefined,
         allEventTypes: true,
         steps: {
           create: {

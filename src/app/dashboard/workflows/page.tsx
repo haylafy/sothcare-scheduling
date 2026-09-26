@@ -84,7 +84,13 @@ export default async function WorkflowsPage() {
         const step = workflow.steps[0];
         const isWebhook = step?.action === "WEBHOOK";
         const isCrmNote = step?.action === "CRM_LOG_NOTE";
-        const timed = workflow.trigger === "BEFORE_EVENT" || workflow.trigger === "AFTER_EVENT";
+        // AFTER_ATTENDANCE_MARKED counts from the moment the host marks the
+        // outcome, so it needs the same offset field as the meeting-anchored
+        // triggers -- without this the delay is invisible and uneditable.
+        const timed =
+          workflow.trigger === "BEFORE_EVENT" ||
+          workflow.trigger === "AFTER_EVENT" ||
+          workflow.trigger === "AFTER_ATTENDANCE_MARKED";
 
         return (
           <Card
@@ -109,7 +115,8 @@ export default async function WorkflowsPage() {
                 )}
               </div>
 
-              {workflow.trigger === "AFTER_EVENT" && (
+              {(workflow.trigger === "AFTER_EVENT" ||
+                workflow.trigger === "AFTER_ATTENDANCE_MARKED") && (
                 <Select
                   name="condition"
                   label="Only send when"
